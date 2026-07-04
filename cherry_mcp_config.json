@@ -1,0 +1,46 @@
+{
+  "mcpServers": {
+    "cherry-pdf": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["servers/pdf_server/server.py"],
+      "workDir": "<YOUR_WORKSPACE_PATH>",
+      "description": "PDF 读取/创建/元数据"
+    },
+    "cherry-office": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["servers/office_server/server.py"],
+      "workDir": "<YOUR_WORKSPACE_PATH>",
+      "description": "Word/Excel/PPT 读写"
+    },
+    "cherry-image": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["servers/image_server/server.py"],
+      "workDir": "<YOUR_WORKSPACE_PATH>",
+      "description": "图片信息/转换/缩放/OCR"
+    },
+    "cherry-archive": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["servers/archive_server/server.py"],
+      "workDir": "<YOUR_WORKSPACE_PATH>",
+      "description": "压缩包列表/解压/创建"
+    },
+    "cherry-media": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["servers/media_server/server.py"],
+      "workDir": "<YOUR_WORKSPACE_PATH>",
+      "description": "音视频元数据/转换/截图 (需FFmpeg)"
+    },
+    "cherry-script": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["servers/script_server/server.py"],
+      "workDir": "<YOUR_WORKSPACE_PATH>",
+      "description": "脚本执行/十六进制/本地预览/HTML转PDF"
+    }
+  }
+}
