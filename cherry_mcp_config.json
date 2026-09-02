@@ -1,0 +1,103 @@
+{
+  "mcpServers": {
+    "cherry-serial": {
+      "type": "stdio",
+      "command": "C:\\Users\\pxsca\\AppData\\Local\\Python\\bin\\python.exe",
+      "args": [
+        "serial_server/server.py"
+      ],
+      "workDir": "D:\\Cherry Studio\\Data\\Workspace\\Cherry Studio_Logger",
+      "description": "串口通信：列表/打开/发送/读取/关闭"
+    },
+    "cherry-archive": {
+      "type": "stdio",
+      "command": "C:\\Users\\pxsca\\AppData\\Local\\Python\\bin\\python.exe",
+      "args": [
+        "archive_server/server.py"
+      ],
+      "workDir": "D:\\Cherry Studio\\Data\\Workspace\\Cherry Studio_Logger",
+      "description": "安全解压 ZIP/TAR 归档文件"
+    },
+    "cherry-image": {
+      "type": "stdio",
+      "command": "C:\\Users\\pxsca\\AppData\\Local\\Python\\bin\\python.exe",
+      "args": [
+        "image_server/server.py"
+      ],
+      "workDir": "D:\\Cherry Studio\\Data\\Workspace\\Cherry Studio_Logger",
+      "description": "图片查看/转换/缩放/OCR"
+    },
+    "cherry-media": {
+      "type": "stdio",
+      "command": "C:\\Users\\pxsca\\AppData\\Local\\Python\\bin\\python.exe",
+      "args": [
+        "media_server/server.py"
+      ],
+      "workDir": "D:\\Cherry Studio\\Data\\Workspace\\Cherry Studio_Logger",
+      "description": "音视频元数据读取/转换"
+    },
+    "cherry-office": {
+      "type": "stdio",
+      "command": "C:\\Users\\pxsca\\AppData\\Local\\Python\\bin\\python.exe",
+      "args": [
+        "office_server/server.py"
+      ],
+      "workDir": "D:\\Cherry Studio\\Data\\Workspace\\Cherry Studio_Logger",
+      "description": "Word/Excel/PPT 读写"
+    },
+    "cherry-pdf": {
+      "type": "stdio",
+      "command": "C:\\Users\\pxsca\\AppData\\Local\\Python\\bin\\python.exe",
+      "args": [
+        "pdf_server/server.py"
+      ],
+      "workDir": "D:\\Cherry Studio\\Data\\Workspace\\Cherry Studio_Logger",
+      "description": "PDF 读写"
+    },
+    "cherry-script": {
+      "type": "stdio",
+      "command": "C:\\Users\\pxsca\\AppData\\Local\\Python\\bin\\python.exe",
+      "args": [
+        "script_server/server.py"
+      ],
+      "workDir": "D:\\Cherry Studio\\Data\\Workspace\\Cherry Studio_Logger",
+      "description": "脚本执行/二进制分析/本地预览"
+    },
+    "cherry-codex": {
+      "type": "stdio",
+      "command": "C:\\Users\\pxsca\\AppData\\Local\\Python\\bin\\python.exe",
+      "args": [
+        "codex_server/server.py"
+      ],
+      "workDir": "D:\\Cherry Studio\\Data\\Workspace\\Cherry Studio_Logger",
+      "description": "代码编辑：读取/写入/编辑文件、搜索代码、执行命令"
+    },
+    "cherry-desktop": {
+      "type": "stdio",
+      "command": "C:\\Users\\pxsca\\AppData\\Local\\Python\\bin\\python.exe",
+      "args": [
+        "desktop_server/server.py"
+      ],
+      "workDir": "D:\\Cherry Studio\\Data\\Workspace\\Cherry Studio_Logger",
+      "description": "桌面自动化：截图/鼠标键盘模拟/窗口管理"
+    },
+    "cherry-office-auto": {
+      "type": "stdio",
+      "command": "C:\\\\Users\\\\pxsca\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python.exe",
+      "args": [
+        "office_automation/server.py"
+      ],
+      "workDir": "D:\\\\Cherry Studio\\\\Data\\\\Workspace\\\\Cherry Studio_Logger",
+      "description": "操控真实 Office 软件 (Word/Excel/PPT)"
+    },
+    "cherry-browser": {
+      "type": "stdio",
+      "command": "C:\\\\Users\\\\pxsca\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python.exe",
+      "args": [
+        "browser_automation/server.py"
+      ],
+      "workDir": "D:\\\\Cherry Studio\\\\Data\\\\Workspace\\\\Cherry Studio_Logger",
+      "description": "浏览器自动化 (Chrome/Edge 控制)"
+    }
+  }
+}
