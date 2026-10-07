@@ -41,14 +41,23 @@ def _validate_coordinate(value: int, max_val: int = 10000) -> int:
     return value
 
 
+def _ps_quote(s: str) -> str:
+    """安全地将用户输入嵌入 PowerShell 单引号字符串。
+
+    单引号字符串内所有字符均为字面量（$、`、;、|、&、引号等都不具特殊含义），
+    只需将字符串内的单引号翻倍转义即可，任意内容都无法闭合字符串或注入语句。
+    """
+    return "'" + s.replace("'", "''") + "'"
+
+
 def _validate_text(text: str, max_len: int = 1000) -> str:
     """验证文本内容，防止注入。"""
     if not isinstance(text, str) or len(text) > max_len:
         raise ValueError(f"无效文本 (最大 {max_len} 字符)")
-    # 防止 PowerShell 注入
+    # 防止 PowerShell 注入：必须检查整个字符串，而非只检查前 50 个字符
     dangerous_chars = ['`', '$', '(', ')', '{', '}', '|', '&', ';', '<', '>']
     for char in dangerous_chars:
-        if char in text[:50]:  # 只检查前 50 个字符
+        if char in text:
             raise ValueError(f"文本包含危险字符: {char}")
     return text
 
@@ -324,7 +333,7 @@ if ({w} -gt 0 -and {h} -gt 0) {{
     $g.CopyFromScreen(0, 0, 0, 0, $s.Bounds.Size)
     $g.Dispose()
 }}
-$bmp.Save("{output_path.replace(chr(92), chr(92)+chr(92))}", [System.Drawing.Imaging.ImageFormat]::Png)
+$bmp.Save({_ps_quote(output_path)}, [System.Drawing.Imaging.ImageFormat]::Png)
 $bmp.Dispose()
 Write-Host $output_path
 '''
@@ -443,7 +452,7 @@ async def _type(args: dict):
     
     ps_cmd = f'''
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
-$text = "{text}"
+$text = {_ps_quote(text)}
 foreach ($char in $text.ToCharArray()) {{
     [System.Windows.Forms.SendKeys]::SendWait($char.ToString())
     Start-Sleep -Milliseconds {int(delay * 1000)}
@@ -464,7 +473,7 @@ async def _key(args: dict):
     
     ps_cmd = f'''
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
-[System.Windows.Forms.SendKeys]::SendWait("{keys}")
+[System.Windows.Forms.SendKeys]::SendWait({_ps_quote(keys)})
 Start-Sleep -Milliseconds {int(delay * 1000)}
 Write-Host OK
 '''
@@ -520,8 +529,8 @@ Write-Host OK
     else:
         ps_cmd = f'''
 Add-Type -AssemblyName Microsoft.VisualBasic
-$ok = [Microsoft.VisualBasic.Interaction]::AppActivate("{title}")
-if (-not $ok) {{ [Microsoft.VisualBasic.Interaction]::AppActivate([int]"{title}") }}
+$ok = [Microsoft.VisualBasic.Interaction]::AppActivate({_ps_quote(title)})
+if (-not $ok) {{ [Microsoft.VisualBasic.Interaction]::AppActivate([int]{_ps_quote(title)}) }}
 Write-Host $ok
 '''
     result = _run_ps(ps_cmd, 5)
@@ -544,7 +553,7 @@ Write-Host OK
 '''
     else:
         ps_cmd = f'''
-Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{title}*" }} | ForEach-Object {{
+Get-Process | Where-Object {{ $_.MainWindowTitle -like ('*' + {_ps_quote(title)} + '*') }} | ForEach-Object {{
     $form = [System.Windows.Forms.Form]::FromHandle($_.MainWindowHandle)
     $form.WindowState = "Minimized"
 }}
@@ -569,7 +578,7 @@ Write-Host OK
 '''
     else:
         ps_cmd = f'''
-Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{title}*" }} | ForEach-Object {{
+Get-Process | Where-Object {{ $_.MainWindowTitle -like ('*' + {_ps_quote(title)} + '*') }} | ForEach-Object {{
     $form = [System.Windows.Forms.Form]::FromHandle($_.MainWindowHandle)
     $form.WindowState = "Maximized"
 }}
@@ -592,7 +601,7 @@ Write-Host OK
 '''
     else:
         ps_cmd = f'''
-Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{title}*" }} | Stop-Process -Force
+Get-Process | Where-Object {{ $_.MainWindowTitle -like ('*' + {_ps_quote(title)} + '*') }} | Stop-Process -Force
 Write-Host OK
 '''
     _run_ps(ps_cmd, 5)

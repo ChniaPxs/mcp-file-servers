@@ -23,6 +23,34 @@ from mcp.types import Tool, TextContent
 server = Server("cherry-browser-automation")
 
 
+def _ps_dquote(s: str) -> str:
+    """安全地将用户输入嵌入 PowerShell 双引号字符串。
+
+    双引号字符串内仅有三个字符具有特殊含义，全部转义后
+    用户输入无法闭合字符串或注入语句（; | & 等在引号内是字面量）。
+    """
+    return (s.replace('`', '``')
+             .replace('$', '`$')
+             .replace('"', '`"'))
+
+
+def _validate_url(url: str, max_len: int = 4096) -> str:
+    """校验 URL：仅允许 http/https，禁止空白字符。
+
+    注入防护由 _ps_dquote 完成（参数化/转义替代字符串拼接），
+    此处负责语义校验，防止浏览器被指向非 http(s) 目标。
+    """
+    if not isinstance(url, str) or not url:
+        raise ValueError("无效 URL")
+    if len(url) > max_len:
+        raise ValueError(f"URL 过长 (最大 {max_len} 字符)")
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("仅支持 http/https 协议")
+    if any(ch.isspace() for ch in url):
+        raise ValueError("URL 不能包含空白字符")
+    return url
+
+
 def _run_ps(cmd: str, timeout: int = 30) -> str:
     """运行 PowerShell 命令。"""
     try:
@@ -250,19 +278,23 @@ async def call_tool(name: str, arguments: dict):
 
 
 async def _open(args: dict):
-    url = args["url"]
+    url = _validate_url(args["url"])
     browser = args.get("browser", "edge")
-    width = args.get("width", 1280)
-    height = args.get("height", 800)
-    
+    if browser not in ("chrome", "edge"):
+        return [TextContent(type="text", text="❌ 无效的浏览器类型 (chrome/edge)")]
+    try:
+        width = int(args.get("width", 1280))
+        height = int(args.get("height", 800))
+    except (TypeError, ValueError):
+        return [TextContent(type="text", text="❌ 无效的窗口尺寸")]
+    if not (200 <= width <= 10000 and 200 <= height <= 10000):
+        return [TextContent(type="text", text="❌ 窗口尺寸超出范围 (200-10000)")]
+
     # 使用 PowerShell 启动浏览器
-    if browser == "chrome":
-        exe = "chrome"
-    else:
-        exe = "msedge"
-    
+    exe = "chrome" if browser == "chrome" else "msedge"
+
     ps_cmd = f'''
-Start-Process "{exe}" -ArgumentList "--window-size={width},{height}", "--app={url}"
+Start-Process "{exe}" -ArgumentList "--window-size={width},{height}", "--app={_ps_dquote(url)}"
 Start-Sleep -Seconds 2
 Write-Host "Browser opened"
 '''
@@ -281,14 +313,14 @@ Write-Host "Browser closed"
 
 
 async def _navigate(args: dict):
-    url = args["url"]
+    url = _validate_url(args["url"])
     ps_cmd = f'''
 # 通过 COM 控制 Edge
 $edge = New-Object -ComObject Microsoft.VCLibs.140.00.App
 # 使用 Start-Process 打开新标签
-Start-Process "msedge" -ArgumentList "{url}"
+Start-Process "msedge" -ArgumentList "{_ps_dquote(url)}"
 Start-Sleep -Seconds 1
-Write-Host "Navigated to {url}"
+Write-Host "Navigated to {_ps_dquote(url)}"
 '''
     _run_ps(ps_cmd, 10)
     return [TextContent(type="text", text=f"✅ 已导航到: {url}")]
@@ -335,7 +367,7 @@ async def _click(args: dict):
 # 点击元素 (简化版 - 使用 PowerShell 模拟点击)
 Add-Type -AssemblyName System.Windows.Forms
 # 注意: 实际项目中建议使用 Selenium WebDriver
-Write-Host "Click selector: {selector}"
+Write-Host "Click selector: {_ps_dquote(selector)}"
 '''
     _run_ps(ps_cmd, 5)
     return [TextContent(type="text", text=f"✅ 已点击: {selector}")]
@@ -348,7 +380,7 @@ async def _type(args: dict):
     ps_cmd = f'''
 # 输入文本 (简化版)
 Add-Type -AssemblyName System.Windows.Forms
-Write-Host "Type to {selector}: {text}"
+Write-Host "Type to {_ps_dquote(selector)}: {_ps_dquote(text)}"
 '''
     _run_ps(ps_cmd, 5)
     return [TextContent(type="text", text=f"✅ 已输入: {text}")]
@@ -360,7 +392,7 @@ async def _select(args: dict):
     
     ps_cmd = f'''
 # 选择下拉选项 (简化版)
-Write-Host "Select {value} in {selector}"
+Write-Host "Select {_ps_dquote(value)} in {_ps_dquote(selector)}"
 '''
     _run_ps(ps_cmd, 5)
     return [TextContent(type="text", text=f"✅ 已选择: {value}")]
@@ -377,9 +409,9 @@ $bmp = New-Object System.Drawing.Bitmap($s.Bounds.Width, $s.Bounds.Height)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen(0, 0, 0, 0, $s.Bounds.Size)
 $g.Dispose()
-$bmp.Save("{output_path.replace(chr(92), chr(92)+chr(92))}", [System.Drawing.Imaging.ImageFormat]::Png)
+$bmp.Save("{_ps_dquote(output_path)}", [System.Drawing.Imaging.ImageFormat]::Png)
 $bmp.Dispose()
-Write-Host "Screenshot saved: {output_path}"
+Write-Host "Screenshot saved: {_ps_dquote(output_path)}"
 '''
     result = _run_ps(ps_cmd, 10)
     return [TextContent(type="text", text=result)]
@@ -391,7 +423,7 @@ async def _execute_js(args: dict):
     
     ps_cmd = f'''
 # 执行 JavaScript (简化版)
-Write-Host "Executed JS: {script[:100]}..."
+Write-Host "Executed JS: {_ps_dquote(script[:100])}..."
 '''
     result = _run_ps(ps_cmd, 5)
     return [TextContent(type="text", text=result)]
@@ -401,7 +433,7 @@ async def _get_text(args: dict):
     selector = args["selector"]
     ps_cmd = f'''
 # 获取文本 (简化版)
-Write-Host "Text from {selector}: (use browser_execute_js for real content)"
+Write-Host "Text from {_ps_dquote(selector)}: (use browser_execute_js for real content)"
 '''
     result = _run_ps(ps_cmd, 5)
     return [TextContent(type="text", text=result)]

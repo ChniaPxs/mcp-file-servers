@@ -11,6 +11,7 @@ Cherry Office Automation MCP Server — 操控真实 Office 软件
 """
 import asyncio
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -20,6 +21,27 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 server = Server("cherry-office-automation")
+
+
+def _ps_quote(s: str) -> str:
+    """安全地将用户输入嵌入 PowerShell 单引号字符串。
+
+    单引号字符串内所有字符均为字面量（$、`、;、|、&、" 等都不具特殊含义），
+    只需将字符串内的单引号翻倍转义即可，任意内容都无法闭合字符串或注入语句。
+    路径中的反斜杠无需额外转义（PowerShell 转义符是反引号而非反斜杠）。
+    """
+    return "'" + s.replace("'", "''") + "'"
+
+
+# Excel 单元格/范围地址：A1、$A$1、A1:B10、$A$1:$B$10
+_CELL_RE = re.compile(r'^\$?[A-Za-z]{1,3}\$?\d{1,7}(:\$?[A-Za-z]{1,3}\$?\d{1,7})?$')
+
+
+def _validate_cell(cell: str) -> str:
+    """校验 Excel 单元格/范围地址，防止把任意字符串拼进 COM 调用。"""
+    if not isinstance(cell, str) or not _CELL_RE.match(cell):
+        raise ValueError(f"无效的单元格/范围地址: {cell!r}")
+    return cell
 
 
 def _run_ps(cmd: str, timeout: int = 30) -> str:
@@ -39,16 +61,6 @@ def _run_ps(cmd: str, timeout: int = 30) -> str:
         raise RuntimeError(f"命令超时 ({timeout}秒)")
     except Exception as e:
         raise RuntimeError(f"命令失败: {e}")
-
-
-def _escape_path(p: str) -> str:
-    """转义路径中的反斜杠。"""
-    return p.replace("\\", "\\\\")
-
-
-def _escape_str(s: str) -> str:
-    """转义字符串中的引号。"""
-    return s.replace('"', '""')
 
 
 @server.list_tools()
@@ -251,7 +263,7 @@ async def _open_word(args: dict):
 $word = New-Object -ComObject Word.Application
 $word.Visible = {str(visible).lower()}
 $word.DisplayAlerts = 0
-$doc = $word.Documents.Open("{_escape_path(file_path)}")
+$doc = $word.Documents.Open({_ps_quote(file_path)})
 $doc.Activate()
 @{{title = $doc.FullName; pid = $word.ID; visible = $word.Visible}} | ConvertTo-Json
 '''
@@ -267,7 +279,7 @@ async def _open_excel(args: dict):
 $excel = New-Object -ComObject Excel.Application
 $excel.Visible = {str(visible).lower()}
 $excel.DisplayAlerts = $false
-$wb = $excel.Workbooks.Open("{_escape_path(file_path)}")
+$wb = $excel.Workbooks.Open({_ps_quote(file_path)})
 $wb.Activate()
 @{{title = $wb.FullName; pid = $excel.ID; visible = $excel.Visible}} | ConvertTo-Json
 '''
@@ -282,7 +294,7 @@ async def _open_ppt(args: dict):
     ps_cmd = f'''
 $ppt = New-Object -ComObject PowerPoint.Application
 $ppt.Visible = {str(visible).lower()}
-$pres = $ppt.Presentations.Open("{_escape_path(file_path)}", $true, $false, $false)
+$pres = $ppt.Presentations.Open({_ps_quote(file_path)}, $true, $false, $false)
 @{{title = $pres.FullName; pid = $ppt.ID; visible = $ppt.Visible}} | ConvertTo-Json
 '''
     result = _run_ps(ps_cmd, 15)
@@ -291,7 +303,7 @@ $pres = $ppt.Presentations.Open("{_escape_path(file_path)}", $true, $false, $fal
 
 async def _write_cell(args: dict):
     file_path = args["file_path"]
-    cell = args["cell"]
+    cell = _validate_cell(args["cell"])
     value = args["value"]
     sheet = args.get("sheet", "Sheet1")
     
@@ -299,9 +311,9 @@ async def _write_cell(args: dict):
 $excel = New-Object -ComObject Excel.Application
 $excel.Visible = $false
 $excel.DisplayAlerts = $false
-$wb = $excel.Workbooks.Open("{_escape_path(file_path)}")
-$ws = $wb.Sheets.Item("{sheet}")
-$ws.Range("{cell}").Value2 = "{_escape_str(value)}"
+$wb = $excel.Workbooks.Open({_ps_quote(file_path)})
+$ws = $wb.Sheets.Item({_ps_quote(sheet)})
+$ws.Range({_ps_quote(cell)}).Value2 = {_ps_quote(value)}
 $wb.Save()
 $wb.Close($false)
 $excel.Quit()
@@ -314,15 +326,15 @@ Write-Host "OK"
 async def _read_range(args: dict):
     file_path = args["file_path"]
     sheet = args.get("sheet", "Sheet1")
-    range_str = args.get("range", "A1:Z100")
+    range_str = _validate_cell(args.get("range", "A1:Z100"))
     
     ps_cmd = f'''
 $excel = New-Object -ComObject Excel.Application
 $excel.Visible = $false
 $excel.DisplayAlerts = $false
-$wb = $excel.Workbooks.Open("{_escape_path(file_path)}")
-$ws = $wb.Sheets.Item("{sheet}")
-$data = $ws.Range("{range_str}").Value2
+$wb = $excel.Workbooks.Open({_ps_quote(file_path)})
+$ws = $wb.Sheets.Item({_ps_quote(sheet)})
+$data = $ws.Range({_ps_quote(range_str)}).Value2
 $wb.Close($false)
 $excel.Quit()
 $data | ConvertTo-Json -Depth 10
@@ -340,13 +352,13 @@ async def _insert_text(args: dict):
 $word = New-Object -ComObject Word.Application
 $word.Visible = $false
 $word.DisplayAlerts = 0
-$doc = $word.Documents.Open("{_escape_path(file_path)}")
+$doc = $word.Documents.Open({_ps_quote(file_path)})
 $sel = $word.Selection
 if ({str(at_beginning).lower()}) {{
-    $doc.Content.InsertBefore("{_escape_str(text)}")
+    $doc.Content.InsertBefore({_ps_quote(text)})
 }} else {{
     $sel.EndKey(6) | Out-Null
-    $sel.TypeText("{_escape_str(text)}")
+    $sel.TypeText({_ps_quote(text)})
 }}
 $doc.Save()
 $doc.Close($false)
@@ -364,7 +376,7 @@ async def _ppt_add_slide(args: dict):
     ps_cmd = f'''
 $ppt = New-Object -ComObject PowerPoint.Application
 $ppt.Visible = $false
-$pres = $ppt.Presentations.Open("{_escape_path(file_path)}", $true, $false, $false)
+$pres = $ppt.Presentations.Open({_ps_quote(file_path)}, $true, $false, $false)
 $slides = $pres.Slides
 $count = $slides.Count
 $newSlide = $slides.Add($count + 1, 12)
@@ -374,7 +386,7 @@ $ppt.Quit()
 @{{total_slides = $count + 1; added_at = $count + 1}} | ConvertTo-Json
 '''
     result = _run_ps(ps_cmd, 30)
-    return [TextContent(type="text", text=f"✅ 已添加幻灯片 (现在共 {_escape_str(result)} 页)")]
+    return [TextContent(type="text", text=f"✅ 已添加幻灯片 (现在共 {result} 页)")]
 
 
 async def _ppt_set_text(args: dict):
@@ -386,11 +398,11 @@ async def _ppt_set_text(args: dict):
     ps_cmd = f'''
 $ppt = New-Object -ComObject PowerPoint.Application
 $ppt.Visible = $false
-$pres = $ppt.Presentations.Open("{_escape_path(file_path)}", $true, $false, $false)
+$pres = $ppt.Presentations.Open({_ps_quote(file_path)}, $true, $false, $false)
 $slide = $pres.Slides.Item({slide_index})
 $shape = $slide.Shapes.Item({shape_index})
 if ($shape.HasTextFrame -eq $true) {{
-    $shape.TextFrame.TextRange.Text = "{_escape_str(text)}"
+    $shape.TextFrame.TextRange.Text = {_ps_quote(text)}
 }}
 $pres.Save()
 $pres.Close()
@@ -407,7 +419,7 @@ async def _ppt_get_slides(args: dict):
     ps_cmd = f'''
 $ppt = New-Object -ComObject PowerPoint.Application
 $ppt.Visible = $false
-$pres = $ppt.Presentations.Open("{_escape_path(file_path)}", $true, $false, $false)
+$pres = $ppt.Presentations.Open({_ps_quote(file_path)}, $true, $false, $false)
 $slides = $pres.Slides
 $result = @()
 foreach ($slide in $slides) {{
@@ -433,7 +445,7 @@ async def _ppt_save(args: dict):
     ps_cmd = f'''
 $ppt = New-Object -ComObject PowerPoint.Application
 $ppt.Visible = $false
-$pres = $ppt.Presentations.Open("{_escape_path(file_path)}", $true, $false, $false)
+$pres = $ppt.Presentations.Open({_ps_quote(file_path)}, $true, $false, $false)
 $pres.Save()
 $pres.Close()
 $ppt.Quit()
