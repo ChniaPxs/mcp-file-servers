@@ -1,0 +1,431 @@
+--- a/browser_automation/server.py
++++ b/browser_automation/server.py
+@@ -21,6 +21,34 @@
+ from mcp.types import Tool, TextContent
+ 
+ server = Server("cherry-browser-automation")
++
++
++def _ps_dquote(s: str) -> str:
++    """安全地将用户输入嵌入 PowerShell 双引号字符串。
++
++    双引号字符串内仅有三个字符具有特殊含义，全部转义后
++    用户输入无法闭合字符串或注入语句（; | & 等在引号内是字面量）。
++    """
++    return (s.replace('`', '``')
++             .replace('$', '`$')
++             .replace('"', '`"'))
++
++
++def _validate_url(url: str, max_len: int = 4096) -> str:
++    """校验 URL：仅允许 http/https，禁止空白字符。
++
++    注入防护由 _ps_dquote 完成（参数化/转义替代字符串拼接），
++    此处负责语义校验，防止浏览器被指向非 http(s) 目标。
++    """
++    if not isinstance(url, str) or not url:
++        raise ValueError("无效 URL")
++    if len(url) > max_len:
++        raise ValueError(f"URL 过长 (最大 {max_len} 字符)")
++    if not url.startswith(("http://", "https://")):
++        raise ValueError("仅支持 http/https 协议")
++    if any(ch.isspace() for ch in url):
++        raise ValueError("URL 不能包含空白字符")
++    return url
+ 
+ 
+ def _run_ps(cmd: str, timeout: int = 30) -> str:
+@@ -250,19 +278,23 @@
+ 
+ 
+ async def _open(args: dict):
+-    url = args["url"]
++    url = _validate_url(args["url"])
+     browser = args.get("browser", "edge")
+-    width = args.get("width", 1280)
+-    height = args.get("height", 800)
+-    
++    if browser not in ("chrome", "edge"):
++        return [TextContent(type="text", text="❌ 无效的浏览器类型 (chrome/edge)")]
++    try:
++        width = int(args.get("width", 1280))
++        height = int(args.get("height", 800))
++    except (TypeError, ValueError):
++        return [TextContent(type="text", text="❌ 无效的窗口尺寸")]
++    if not (200 <= width <= 10000 and 200 <= height <= 10000):
++        return [TextContent(type="text", text="❌ 窗口尺寸超出范围 (200-10000)")]
++
+     # 使用 PowerShell 启动浏览器
+-    if browser == "chrome":
+-        exe = "chrome"
+-    else:
+-        exe = "msedge"
+-    
+-    ps_cmd = f'''
+-Start-Process "{exe}" -ArgumentList "--window-size={width},{height}", "--app={url}"
++    exe = "chrome" if browser == "chrome" else "msedge"
++
++    ps_cmd = f'''
++Start-Process "{exe}" -ArgumentList "--window-size={width},{height}", "--app={_ps_dquote(url)}"
+ Start-Sleep -Seconds 2
+ Write-Host "Browser opened"
+ '''
+@@ -281,14 +313,14 @@
+ 
+ 
+ async def _navigate(args: dict):
+-    url = args["url"]
++    url = _validate_url(args["url"])
+     ps_cmd = f'''
+ # 通过 COM 控制 Edge
+ $edge = New-Object -ComObject Microsoft.VCLibs.140.00.App
+ # 使用 Start-Process 打开新标签
+-Start-Process "msedge" -ArgumentList "{url}"
++Start-Process "msedge" -ArgumentList "{_ps_dquote(url)}"
+ Start-Sleep -Seconds 1
+-Write-Host "Navigated to {url}"
++Write-Host "Navigated to {_ps_dquote(url)}"
+ '''
+     _run_ps(ps_cmd, 10)
+     return [TextContent(type="text", text=f"✅ 已导航到: {url}")]
+@@ -335,7 +367,7 @@
+ # 点击元素 (简化版 - 使用 PowerShell 模拟点击)
+ Add-Type -AssemblyName System.Windows.Forms
+ # 注意: 实际项目中建议使用 Selenium WebDriver
+-Write-Host "Click selector: {selector}"
++Write-Host "Click selector: {_ps_dquote(selector)}"
+ '''
+     _run_ps(ps_cmd, 5)
+     return [TextContent(type="text", text=f"✅ 已点击: {selector}")]
+@@ -348,7 +380,7 @@
+     ps_cmd = f'''
+ # 输入文本 (简化版)
+ Add-Type -AssemblyName System.Windows.Forms
+-Write-Host "Type to {selector}: {text}"
++Write-Host "Type to {_ps_dquote(selector)}: {_ps_dquote(text)}"
+ '''
+     _run_ps(ps_cmd, 5)
+     return [TextContent(type="text", text=f"✅ 已输入: {text}")]
+@@ -360,7 +392,7 @@
+     
+     ps_cmd = f'''
+ # 选择下拉选项 (简化版)
+-Write-Host "Select {value} in {selector}"
++Write-Host "Select {_ps_dquote(value)} in {_ps_dquote(selector)}"
+ '''
+     _run_ps(ps_cmd, 5)
+     return [TextContent(type="text", text=f"✅ 已选择: {value}")]
+@@ -377,9 +409,9 @@
+ $g = [System.Drawing.Graphics]::FromImage($bmp)
+ $g.CopyFromScreen(0, 0, 0, 0, $s.Bounds.Size)
+ $g.Dispose()
+-$bmp.Save("{output_path.replace(chr(92), chr(92)+chr(92))}", [System.Drawing.Imaging.ImageFormat]::Png)
++$bmp.Save("{_ps_dquote(output_path)}", [System.Drawing.Imaging.ImageFormat]::Png)
+ $bmp.Dispose()
+-Write-Host "Screenshot saved: {output_path}"
++Write-Host "Screenshot saved: {_ps_dquote(output_path)}"
+ '''
+     result = _run_ps(ps_cmd, 10)
+     return [TextContent(type="text", text=result)]
+@@ -391,7 +423,7 @@
+     
+     ps_cmd = f'''
+ # 执行 JavaScript (简化版)
+-Write-Host "Executed JS: {script[:100]}..."
++Write-Host "Executed JS: {_ps_dquote(script[:100])}..."
+ '''
+     result = _run_ps(ps_cmd, 5)
+     return [TextContent(type="text", text=result)]
+@@ -401,7 +433,7 @@
+     selector = args["selector"]
+     ps_cmd = f'''
+ # 获取文本 (简化版)
+-Write-Host "Text from {selector}: (use browser_execute_js for real content)"
++Write-Host "Text from {_ps_dquote(selector)}: (use browser_execute_js for real content)"
+ '''
+     result = _run_ps(ps_cmd, 5)
+     return [TextContent(type="text", text=result)]
+--- a/desktop_server/server.py
++++ b/desktop_server/server.py
+@@ -41,14 +41,23 @@
+     return value
+ 
+ 
++def _ps_quote(s: str) -> str:
++    """安全地将用户输入嵌入 PowerShell 单引号字符串。
++
++    单引号字符串内所有字符均为字面量（$、`、;、|、&、引号等都不具特殊含义），
++    只需将字符串内的单引号翻倍转义即可，任意内容都无法闭合字符串或注入语句。
++    """
++    return "'" + s.replace("'", "''") + "'"
++
++
+ def _validate_text(text: str, max_len: int = 1000) -> str:
+     """验证文本内容，防止注入。"""
+     if not isinstance(text, str) or len(text) > max_len:
+         raise ValueError(f"无效文本 (最大 {max_len} 字符)")
+-    # 防止 PowerShell 注入
++    # 防止 PowerShell 注入：必须检查整个字符串，而非只检查前 50 个字符
+     dangerous_chars = ['`', '$', '(', ')', '{', '}', '|', '&', ';', '<', '>']
+     for char in dangerous_chars:
+-        if char in text[:50]:  # 只检查前 50 个字符
++        if char in text:
+             raise ValueError(f"文本包含危险字符: {char}")
+     return text
+ 
+@@ -324,7 +333,7 @@
+     $g.CopyFromScreen(0, 0, 0, 0, $s.Bounds.Size)
+     $g.Dispose()
+ }}
+-$bmp.Save("{output_path.replace(chr(92), chr(92)+chr(92))}", [System.Drawing.Imaging.ImageFormat]::Png)
++$bmp.Save({_ps_quote(output_path)}, [System.Drawing.Imaging.ImageFormat]::Png)
+ $bmp.Dispose()
+ Write-Host $output_path
+ '''
+@@ -443,7 +452,7 @@
+     
+     ps_cmd = f'''
+ Add-Type -AssemblyName System.Windows.Forms | Out-Null
+-$text = "{text}"
++$text = {_ps_quote(text)}
+ foreach ($char in $text.ToCharArray()) {{
+     [System.Windows.Forms.SendKeys]::SendWait($char.ToString())
+     Start-Sleep -Milliseconds {int(delay * 1000)}
+@@ -464,7 +473,7 @@
+     
+     ps_cmd = f'''
+ Add-Type -AssemblyName System.Windows.Forms | Out-Null
+-[System.Windows.Forms.SendKeys]::SendWait("{keys}")
++[System.Windows.Forms.SendKeys]::SendWait({_ps_quote(keys)})
+ Start-Sleep -Milliseconds {int(delay * 1000)}
+ Write-Host OK
+ '''
+@@ -520,8 +529,8 @@
+     else:
+         ps_cmd = f'''
+ Add-Type -AssemblyName Microsoft.VisualBasic
+-$ok = [Microsoft.VisualBasic.Interaction]::AppActivate("{title}")
+-if (-not $ok) {{ [Microsoft.VisualBasic.Interaction]::AppActivate([int]"{title}") }}
++$ok = [Microsoft.VisualBasic.Interaction]::AppActivate({_ps_quote(title)})
++if (-not $ok) {{ [Microsoft.VisualBasic.Interaction]::AppActivate([int]{_ps_quote(title)}) }}
+ Write-Host $ok
+ '''
+     result = _run_ps(ps_cmd, 5)
+@@ -544,7 +553,7 @@
+ '''
+     else:
+         ps_cmd = f'''
+-Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{title}*" }} | ForEach-Object {{
++Get-Process | Where-Object {{ $_.MainWindowTitle -like ('*' + {_ps_quote(title)} + '*') }} | ForEach-Object {{
+     $form = [System.Windows.Forms.Form]::FromHandle($_.MainWindowHandle)
+     $form.WindowState = "Minimized"
+ }}
+@@ -569,7 +578,7 @@
+ '''
+     else:
+         ps_cmd = f'''
+-Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{title}*" }} | ForEach-Object {{
++Get-Process | Where-Object {{ $_.MainWindowTitle -like ('*' + {_ps_quote(title)} + '*') }} | ForEach-Object {{
+     $form = [System.Windows.Forms.Form]::FromHandle($_.MainWindowHandle)
+     $form.WindowState = "Maximized"
+ }}
+@@ -592,7 +601,7 @@
+ '''
+     else:
+         ps_cmd = f'''
+-Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{title}*" }} | Stop-Process -Force
++Get-Process | Where-Object {{ $_.MainWindowTitle -like ('*' + {_ps_quote(title)} + '*') }} | Stop-Process -Force
+ Write-Host OK
+ '''
+     _run_ps(ps_cmd, 5)
+--- a/office_automation/server.py
++++ b/office_automation/server.py
+@@ -11,6 +11,7 @@
+ """
+ import asyncio
+ import json
++import re
+ import subprocess
+ from pathlib import Path
+ from typing import Optional
+@@ -20,6 +21,27 @@
+ from mcp.types import Tool, TextContent
+ 
+ server = Server("cherry-office-automation")
++
++
++def _ps_quote(s: str) -> str:
++    """安全地将用户输入嵌入 PowerShell 单引号字符串。
++
++    单引号字符串内所有字符均为字面量（$、`、;、|、&、" 等都不具特殊含义），
++    只需将字符串内的单引号翻倍转义即可，任意内容都无法闭合字符串或注入语句。
++    路径中的反斜杠无需额外转义（PowerShell 转义符是反引号而非反斜杠）。
++    """
++    return "'" + s.replace("'", "''") + "'"
++
++
++# Excel 单元格/范围地址：A1、$A$1、A1:B10、$A$1:$B$10
++_CELL_RE = re.compile(r'^\$?[A-Za-z]{1,3}\$?\d{1,7}(:\$?[A-Za-z]{1,3}\$?\d{1,7})?$')
++
++
++def _validate_cell(cell: str) -> str:
++    """校验 Excel 单元格/范围地址，防止把任意字符串拼进 COM 调用。"""
++    if not isinstance(cell, str) or not _CELL_RE.match(cell):
++        raise ValueError(f"无效的单元格/范围地址: {cell!r}")
++    return cell
+ 
+ 
+ def _run_ps(cmd: str, timeout: int = 30) -> str:
+@@ -39,16 +61,6 @@
+         raise RuntimeError(f"命令超时 ({timeout}秒)")
+     except Exception as e:
+         raise RuntimeError(f"命令失败: {e}")
+-
+-
+-def _escape_path(p: str) -> str:
+-    """转义路径中的反斜杠。"""
+-    return p.replace("\\", "\\\\")
+-
+-
+-def _escape_str(s: str) -> str:
+-    """转义字符串中的引号。"""
+-    return s.replace('"', '""')
+ 
+ 
+ @server.list_tools()
+@@ -251,7 +263,7 @@
+ $word = New-Object -ComObject Word.Application
+ $word.Visible = {str(visible).lower()}
+ $word.DisplayAlerts = 0
+-$doc = $word.Documents.Open("{_escape_path(file_path)}")
++$doc = $word.Documents.Open({_ps_quote(file_path)})
+ $doc.Activate()
+ @{{title = $doc.FullName; pid = $word.ID; visible = $word.Visible}} | ConvertTo-Json
+ '''
+@@ -267,7 +279,7 @@
+ $excel = New-Object -ComObject Excel.Application
+ $excel.Visible = {str(visible).lower()}
+ $excel.DisplayAlerts = $false
+-$wb = $excel.Workbooks.Open("{_escape_path(file_path)}")
++$wb = $excel.Workbooks.Open({_ps_quote(file_path)})
+ $wb.Activate()
+ @{{title = $wb.FullName; pid = $excel.ID; visible = $excel.Visible}} | ConvertTo-Json
+ '''
+@@ -282,7 +294,7 @@
+     ps_cmd = f'''
+ $ppt = New-Object -ComObject PowerPoint.Application
+ $ppt.Visible = {str(visible).lower()}
+-$pres = $ppt.Presentations.Open("{_escape_path(file_path)}", $true, $false, $false)
++$pres = $ppt.Presentations.Open({_ps_quote(file_path)}, $true, $false, $false)
+ @{{title = $pres.FullName; pid = $ppt.ID; visible = $ppt.Visible}} | ConvertTo-Json
+ '''
+     result = _run_ps(ps_cmd, 15)
+@@ -291,7 +303,7 @@
+ 
+ async def _write_cell(args: dict):
+     file_path = args["file_path"]
+-    cell = args["cell"]
++    cell = _validate_cell(args["cell"])
+     value = args["value"]
+     sheet = args.get("sheet", "Sheet1")
+     
+@@ -299,9 +311,9 @@
+ $excel = New-Object -ComObject Excel.Application
+ $excel.Visible = $false
+ $excel.DisplayAlerts = $false
+-$wb = $excel.Workbooks.Open("{_escape_path(file_path)}")
+-$ws = $wb.Sheets.Item("{sheet}")
+-$ws.Range("{cell}").Value2 = "{_escape_str(value)}"
++$wb = $excel.Workbooks.Open({_ps_quote(file_path)})
++$ws = $wb.Sheets.Item({_ps_quote(sheet)})
++$ws.Range({_ps_quote(cell)}).Value2 = {_ps_quote(value)}
+ $wb.Save()
+ $wb.Close($false)
+ $excel.Quit()
+@@ -314,15 +326,15 @@
+ async def _read_range(args: dict):
+     file_path = args["file_path"]
+     sheet = args.get("sheet", "Sheet1")
+-    range_str = args.get("range", "A1:Z100")
++    range_str = _validate_cell(args.get("range", "A1:Z100"))
+     
+     ps_cmd = f'''
+ $excel = New-Object -ComObject Excel.Application
+ $excel.Visible = $false
+ $excel.DisplayAlerts = $false
+-$wb = $excel.Workbooks.Open("{_escape_path(file_path)}")
+-$ws = $wb.Sheets.Item("{sheet}")
+-$data = $ws.Range("{range_str}").Value2
++$wb = $excel.Workbooks.Open({_ps_quote(file_path)})
++$ws = $wb.Sheets.Item({_ps_quote(sheet)})
++$data = $ws.Range({_ps_quote(range_str)}).Value2
+ $wb.Close($false)
+ $excel.Quit()
+ $data | ConvertTo-Json -Depth 10
+@@ -340,13 +352,13 @@
+ $word = New-Object -ComObject Word.Application
+ $word.Visible = $false
+ $word.DisplayAlerts = 0
+-$doc = $word.Documents.Open("{_escape_path(file_path)}")
++$doc = $word.Documents.Open({_ps_quote(file_path)})
+ $sel = $word.Selection
+ if ({str(at_beginning).lower()}) {{
+-    $doc.Content.InsertBefore("{_escape_str(text)}")
++    $doc.Content.InsertBefore({_ps_quote(text)})
+ }} else {{
+     $sel.EndKey(6) | Out-Null
+-    $sel.TypeText("{_escape_str(text)}")
++    $sel.TypeText({_ps_quote(text)})
+ }}
+ $doc.Save()
+ $doc.Close($false)
+@@ -364,7 +376,7 @@
+     ps_cmd = f'''
+ $ppt = New-Object -ComObject PowerPoint.Application
+ $ppt.Visible = $false
+-$pres = $ppt.Presentations.Open("{_escape_path(file_path)}", $true, $false, $false)
++$pres = $ppt.Presentations.Open({_ps_quote(file_path)}, $true, $false, $false)
+ $slides = $pres.Slides
+ $count = $slides.Count
+ $newSlide = $slides.Add($count + 1, 12)
+@@ -374,7 +386,7 @@
+ @{{total_slides = $count + 1; added_at = $count + 1}} | ConvertTo-Json
+ '''
+     result = _run_ps(ps_cmd, 30)
+-    return [TextContent(type="text", text=f"✅ 已添加幻灯片 (现在共 {_escape_str(result)} 页)")]
++    return [TextContent(type="text", text=f"✅ 已添加幻灯片 (现在共 {result} 页)")]
+ 
+ 
+ async def _ppt_set_text(args: dict):
+@@ -386,11 +398,11 @@
+     ps_cmd = f'''
+ $ppt = New-Object -ComObject PowerPoint.Application
+ $ppt.Visible = $false
+-$pres = $ppt.Presentations.Open("{_escape_path(file_path)}", $true, $false, $false)
++$pres = $ppt.Presentations.Open({_ps_quote(file_path)}, $true, $false, $false)
+ $slide = $pres.Slides.Item({slide_index})
+ $shape = $slide.Shapes.Item({shape_index})
+ if ($shape.HasTextFrame -eq $true) {{
+-    $shape.TextFrame.TextRange.Text = "{_escape_str(text)}"
++    $shape.TextFrame.TextRange.Text = {_ps_quote(text)}
+ }}
+ $pres.Save()
+ $pres.Close()
+@@ -407,7 +419,7 @@
+     ps_cmd = f'''
+ $ppt = New-Object -ComObject PowerPoint.Application
+ $ppt.Visible = $false
+-$pres = $ppt.Presentations.Open("{_escape_path(file_path)}", $true, $false, $false)
++$pres = $ppt.Presentations.Open({_ps_quote(file_path)}, $true, $false, $false)
+ $slides = $pres.Slides
+ $result = @()
+ foreach ($slide in $slides) {{
+@@ -433,7 +445,7 @@
+     ps_cmd = f'''
+ $ppt = New-Object -ComObject PowerPoint.Application
+ $ppt.Visible = $false
+-$pres = $ppt.Presentations.Open("{_escape_path(file_path)}", $true, $false, $false)
++$pres = $ppt.Presentations.Open({_ps_quote(file_path)}, $true, $false, $false)
+ $pres.Save()
+ $pres.Close()
+ $ppt.Quit()
